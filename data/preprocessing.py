@@ -78,6 +78,7 @@ class BinningTransform(nn.Module):
 
         :param from_key: the key to extract the information from the input data
         :param to_key: the key to store the transformed information
+        :param group_key: the key to extract the group information (i.e. omics modality) from the input data
         :param n_bins: number of bins
         """
         super().__init__()
