@@ -8,3 +8,4 @@ scikit-learn~=1.5.2
 einops~=0.8.1
 local-attention~=1.11.1
 tqdm~=4.67.1
+torchmetrics~=1.7.0

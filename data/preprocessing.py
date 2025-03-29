@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 import numpy as np
 from torch import nn
@@ -39,20 +39,53 @@ def _digitize(x: np.ndarray, bins: np.ndarray, side="both") -> np.ndarray:
     return digits
 
 
-class Sequential(nn.Sequential):
+class Compose:
     r"""A container to host a sequence of text transforms."""
 
-    def forward(self, input: Any) -> Any:
+    def __init__(self, transforms):
+        """
+        :param transforms: A sequence of transforms.
+        :type transforms: `List[Callable]`
+        """
+        self.transforms = transforms
+
+    def __call__(self, input: Any) -> Any:
         """
         :param input: Input sequence or batch. The input type must be supported by the first transform in the sequence.
         :type input: `Any`
         """
-        for module in self:
-            input = module(input)
+        for t in self.transforms:
+            input = t(input)
         return input
 
+    def __repr__(self) -> str:
+        format_string = self.__class__.__name__ + "("
+        for t in self.transforms:
+            format_string += "\n"
+            format_string += f"    {t}"
+        format_string += "\n)"
+        return format_string
 
-class DataTransform(nn.Module):
+
+class SourceNameExtractor:
+    def __call__(self, x: str) -> int:
+        return int(x.split('_', 1)[0])
+
+
+class FeatureIdExtractor:
+    def __init__(self, feature_map: Dict[str, int]):
+        """
+        Extract the feature id from the input data.
+
+        :param feature_map: the mapping from the feature name to the feature id
+        """
+        self.feature_map = feature_map
+
+    def __call__(self, x: str) -> int:
+        return self.feature_map[x.split('_', 1)[1]]
+
+
+class DataTransform:
     def __init__(self, from_key: str, to_key: str, transform_fn):
         """
         Extract the information from the input data, transform it, and save it to the output data.
@@ -65,10 +98,13 @@ class DataTransform(nn.Module):
         self.to_key = to_key
         self.transform_fn = transform_fn
 
-    def forward(self, item):
+    def __call__(self, item):
         data_source = [self.transform_fn(x) for x in item[self.from_key]]
         item[self.to_key] = np.array(data_source)
         return item
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
 
 
 class BinningTransform(nn.Module):
