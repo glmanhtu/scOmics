@@ -111,3 +111,4 @@ class BinningTransform(nn.Module):
             binned_data[group_indices] = binned_row
 
         item[self.to_key] = binned_data
+        return item
