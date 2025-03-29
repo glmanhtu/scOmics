@@ -143,7 +143,8 @@ if __name__ == '__main__':
 
                 # Print statistics
                 if index > 0 and index % 50 == 0:
-                    print(f"Epoch {epoch + 1} : Step {index + 1}: Average Loss = {train_loss.compute().item():.4f}, "
+                    print(f"Epoch {epoch + 1}/{N_EPOCHS} : Step {index + 1}/{len(data_loader)}: "
+                          f"Average Loss = {train_loss.compute().item():.4f}, "
                           f"Accuracy = {train_acc.compute().item():.4f}")
                     train_loss.reset()
                     train_acc.reset()
