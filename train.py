@@ -86,8 +86,8 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
         if epoch % VALIDATE_EVERY != 0:
             continue
 
-        for source_id in range(len(data_files)):
-            source_name = data_files[source_id].split("_")[-1]
+        for source_id in range(len(DATA_FILES)):
+            source_name = DATA_FILES[source_id].split("_")[-1]
             loss, acc = evaluation(net, val_dataset, source_id, device)
             print(f"[{source_name}]: Validation Loss = {loss:.4f}, Validation Accuracy = {acc:.4f}")
 
@@ -133,7 +133,7 @@ if __name__ == '__main__':
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    data_files = [
+    DATA_FILES = [
         '20231023_092657_imputed_drugresponse.csv',
         '20231023_092657_imputed_metabolomics.csv',
         '20231023_092657_imputed_proteomics.csv',
@@ -144,7 +144,7 @@ if __name__ == '__main__':
     X = []
     X_masked = []
     feature_names = []
-    for data_id, data_file_name in enumerate(data_files):
+    for data_id, data_file_name in enumerate(DATA_FILES):
         data = pd.read_csv(os.path.join(DATA_PATH, data_file_name), index_col=0)
         feature_names += data.columns.tolist()  # Collect all feature names
         data.rename(columns=lambda x: f'{data_id}_{x}', inplace=True)   # Rename columns to keep track of data source
@@ -177,7 +177,7 @@ if __name__ == '__main__':
         model = TransformerModel(
             ntoken=len(feature_names) + len(SPECIAL_TOKENS),
             n_input_bins=N_CLASSES,
-            n_sources=len(data_files) + len(SPECIAL_TOKENS),
+            n_sources=len(DATA_FILES) + len(SPECIAL_TOKENS),
             d_model=512,
             nhead=8,
             d_hid=512,
