@@ -4,6 +4,15 @@ from torch.utils.data import Dataset
 
 class SCOmicsData(Dataset):
     def __init__(self, X_masked, X,  transform=None):
+        """
+        A Simple dataset that holds the masked data and the original data.
+        Each sample of the dataset is a row (or a single cell) composed of the masked data and the original data.
+        When iterating over the dataset, it returns a transformed dictionary of the masked data and the original data.
+
+        :param X_masked: DataFrame of the data to be masked (proteomics)
+        :param X: DataFrame of the data to be used as input (other omics)
+        :param transform: a function to transform the data, should be the composition of the transforms
+        """
         self.X_masked = X_masked
         self.X = X
         self.transform = transform
@@ -35,8 +44,8 @@ class SCOmicsDataWrapper(Dataset):
                  seq_len: int,
                  pad_token_id: int,
                  mask_token_id: int,
-                 n_label_range=(1, 5),
-                 token_shifting=0
+                 token_shifting=0,
+                 n_label_range=(1, 5)
                  ):
         """
         A wrapper for the SCOmicsData class to create a dataset for the model.
@@ -47,8 +56,8 @@ class SCOmicsDataWrapper(Dataset):
         :param seq_len: sequence length for each sample, will be padded if the length is less than seq_len
         :param pad_token_id: The ID of the padding token.
         :param mask_token_id: The ID of the mask token.
-        :param n_label_range: Chunk size range for the masked target data.
         :param token_shifting: Number of tokens to shift for the input data to avoid overlap with special tokens.
+        :param n_label_range: Chunk size range for the masked target data.
         """
         self.dataset = dataset
 
