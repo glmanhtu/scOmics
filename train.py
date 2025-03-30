@@ -12,7 +12,7 @@ from data.preprocessing import DataTransform, Compose, BinningTransform, SourceN
 from scomics.model.model import TransformerModel
 from torchmetrics import MeanMetric, Accuracy
 
-from utils.utils import save_ckpt
+from utils.utils import save_ckpt, seed_everything
 
 
 def training(net: torch.nn.Module, optimizer: Optimizer, dataset: SCOmicsData, source_id: int, device: torch.device):
@@ -132,6 +132,7 @@ if __name__ == '__main__':
     N_WORKERS = args.n_workers
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    seed_everything(SEED)
 
     DATA_FILES = [
         '20231023_092657_imputed_drugresponse.csv',
