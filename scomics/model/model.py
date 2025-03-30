@@ -1,5 +1,6 @@
 from typing import Optional, Any
 
+import torch
 from torch import nn, Tensor
 from torch.nn import TransformerEncoderLayer, TransformerEncoder
 
@@ -48,7 +49,14 @@ class TransformerModel(nn.Module):
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
         self.out_layer = nn.Linear(d_model, n_input_bins)
 
-    def forward(self, x: Tensor, sources: Tensor, values: Tensor, src_key_padding_mask: Tensor) -> Tensor:
+    def forward(self, batch) -> Tensor:
+        device = self.out_layer.weight.device
+
+        values = batch['X_bin_input'].to(device)
+        sources = batch['X_input_source'].to(device)
+        x = batch['X_input_names'].to(device)
+        src_key_padding_mask = batch['X_key_padding_mask'].type(torch.float32).to(device)
+
         x = self.encoder(x)
         sources = self.source_encoder(sources)
         values = self.value_encoder(values)

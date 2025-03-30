@@ -45,18 +45,20 @@ class SCOmicsDataWrapper(Dataset):
                  pad_token_id: int,
                  mask_token_id: int,
                  token_shifting=0,
+                 source_id=-1,
                  n_label_range=(1, 5)
                  ):
         """
         A wrapper for the SCOmicsData class to create a dataset for the model.
         Since our dataset is quite small, we split the masked target dataset (proteomics) into multiple chunks,
-        then we use the other omics data to predict the masked target data.
+        then we use the other omics data to predict these masked chunks.
 
         :param dataset: SCOmicsData
         :param seq_len: sequence length for each sample, will be padded if the length is less than seq_len
         :param pad_token_id: The ID of the padding token.
         :param mask_token_id: The ID of the mask token.
         :param token_shifting: Number of tokens to shift for the input data to avoid overlap with special tokens.
+        :param source_id: Filter the source ID for the input data, default to -1 (no filter).
         :param n_label_range: Chunk size range for the masked target data.
         """
         self.dataset = dataset
@@ -66,6 +68,7 @@ class SCOmicsDataWrapper(Dataset):
         self.pad_token_id = pad_token_id
         self.mask_token_id = mask_token_id
         self.token_shifting = token_shifting
+        self.source_id = source_id
         X_masked_len = len(self.dataset.X_masked.columns.tolist())
         for i in range(len(self.dataset)):
             X_masked_indices = np.arange(X_masked_len)
@@ -90,6 +93,13 @@ class SCOmicsDataWrapper(Dataset):
         X_source = item["X_source"] + self.token_shifting
         X_names = item["X_names"] + self.token_shifting
 
+        if self.source_id != -1:
+            mask = item["X_source"] == self.source_id
+            X = X[mask]
+            X_bin = X_bin[mask]
+            X_source = X_source[mask]
+            X_names = X_names[mask]
+
         X_masked = item["X_masked"]
         X_masked_bin = item["X_masked_bin"] + self.token_shifting
         X_masked_source = item["X_masked_source"] + self.token_shifting
@@ -102,7 +112,7 @@ class SCOmicsDataWrapper(Dataset):
         X_masked_source = X_masked_source[X_masked_indices]
         X_masked_names = X_masked_names[X_masked_indices]
 
-        n_X = np.random.randint(int(0.1 * self.seq_len), self.seq_len - n_labels)
+        n_X = np.random.randint(int(0.2 * self.seq_len), self.seq_len - n_labels)
         X_indices = np.random.choice(len(X), n_X, replace=False)
         X = X[X_indices]
         X_bin = X_bin[X_indices]
