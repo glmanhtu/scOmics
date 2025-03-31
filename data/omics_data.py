@@ -113,6 +113,7 @@ class SCOmicsDataWrapper(Dataset):
         X_masked_names = X_masked_names[X_masked_indices]
 
         n_X = np.random.randint(int(0.2 * self.seq_len), self.seq_len - n_labels)
+        n_X = n_X if n_X < len(X) else len(X)   # to avoid index out of range
         X_indices = np.random.choice(len(X), n_X, replace=False)
         X = X[X_indices]
         X_bin = X_bin[X_indices]

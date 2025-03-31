@@ -17,7 +17,7 @@ from utils.utils import save_ckpt, seed_everything
 
 def training(net: torch.nn.Module, optimizer: Optimizer, dataset: SCOmicsData, source_id: int, device: torch.device):
     training_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id)
-    data_loader = DataLoader(training_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=N_WORKERS)
+    data_loader = DataLoader(training_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=N_WORKERS, pin_memory=True)
 
     net.train()
     train_loss, train_acc = MeanMetric(), MeanMetric()
@@ -49,7 +49,7 @@ def training(net: torch.nn.Module, optimizer: Optimizer, dataset: SCOmicsData, s
 
 def evaluation(net: torch.nn.Module, dataset: SCOmicsData, source_id: int, device: torch.device):
     validation_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id)
-    val_loader = DataLoader(validation_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=N_WORKERS)
+    val_loader = DataLoader(validation_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=N_WORKERS, pin_memory=True)
 
     net.eval()
     val_loss, val_acc = MeanMetric(), MeanMetric()
