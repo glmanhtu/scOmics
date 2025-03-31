@@ -5,7 +5,7 @@ import pandas as pd
 import torch
 from sklearn.model_selection import KFold
 from torch import nn
-from torch.optim import Adam, Optimizer
+from torch.optim import Adam, Optimizer, AdamW
 from torch.utils.data import DataLoader
 from data.omics_data import SCOmicsData, SCOmicsDataWrapper
 from data.preprocessing import DataTransform, Compose, BinningTransform, SourceNameExtractor, FeatureIdExtractor
@@ -15,72 +15,79 @@ from torchmetrics import MeanMetric, Accuracy
 from utils.utils import save_ckpt, seed_everything
 
 
-def training(net: torch.nn.Module, optimizer: Optimizer, dataset: SCOmicsData, source_id: int, device: torch.device):
+def training(net: nn.Module,
+             optimizer: Optimizer,
+             scaler: torch.cuda.amp.GradScaler,
+             dataset: SCOmicsData,
+             source_id: int,
+             device: torch.device):
     training_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id)
     data_loader = DataLoader(training_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=N_WORKERS, pin_memory=True)
 
     net.train()
-    train_loss, train_acc = MeanMetric(), MeanMetric()
-    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_TOKEN_ID, reduction='mean')
-    acc_metric = Accuracy(task='multiclass', num_classes=N_CLASSES, ignore_index=PAD_TOKEN_ID).to(device)
+    train_loss = MeanMetric()
+    loss_fn = torch.nn.MSELoss(reduction='mean')
     for index, batch in enumerate(data_loader):
         # Forward pass
         optimizer.zero_grad()
-        output = net(batch)
+        with torch.amp.autocast(device.type, enabled=AMP):
+            output = net(batch)
 
-        preds, actual = output.view(-1, N_CLASSES), batch['X_bin_labels'].view(-1).to(device)
-        loss = loss_fn(preds, actual)
-        acc = acc_metric(preds.softmax(dim=-1), actual)
+            preds, actual = output.view(-1), batch['X_original_labels'].view(-1).to(device)
+            padding_mask = actual != PAD_TOKEN_ID
+            preds, actual = preds[padding_mask], actual[padding_mask]
+
+            loss = loss_fn(preds, actual)
 
         # Backward pass and optimization
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+
+        scaler.step(optimizer)
+        scaler.update()
         train_loss.update(loss.item())
-        train_acc.update(acc.item())
 
         # Print statistics
         if index > 0 and index % 50 == 0:
             print(f"Step {index + 1}/{len(data_loader)}: "
-                  f"Average Loss = {train_loss.compute().item():.4f}, "
-                  f"Accuracy = {train_acc.compute().item():.4f}")
+                  f"Average Loss = {train_loss.compute().item():.4f}")
             train_loss.reset()
-            train_acc.reset()
 
 
 def evaluation(net: torch.nn.Module, dataset: SCOmicsData, source_id: int, device: torch.device):
-    validation_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id)
-    val_loader = DataLoader(validation_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=N_WORKERS, pin_memory=True)
+    val_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id, eval_mode=True)
+    val_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=N_WORKERS, pin_memory=True)
 
     net.eval()
-    val_loss, val_acc = MeanMetric(), MeanMetric()
-    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_TOKEN_ID, reduction='mean')
-    acc_metric = Accuracy(task='multiclass', num_classes=N_CLASSES, ignore_index=PAD_TOKEN_ID).to(device)
+    val_loss = MeanMetric()
+    loss_fn = torch.nn.MSELoss(reduction='mean')
     with torch.no_grad():
         for index, batch in enumerate(val_loader):
-            output = net(batch)
+            with torch.amp.autocast(device.type, enabled=AMP):
+                output = net(batch)
 
-            # Compute loss
-            preds, actual = output.view(-1, N_CLASSES),  batch['X_bin_labels'].view(-1).to(device)
-            loss = loss_fn(preds, actual)
-            acc = acc_metric(preds.softmax(dim=-1), actual)
+                # Compute loss
+                preds, actual = output.view(-1),  batch['X_original_labels'].view(-1).to(device)
+                padding_mask = actual != PAD_TOKEN_ID
+                preds, actual = preds[padding_mask], actual[padding_mask]
+
+                loss = loss_fn(preds, actual)
 
             val_loss.update(loss.item())
-            val_acc.update(acc.item())
 
-        loss, acc = val_loss.compute().item(), val_acc.compute().item()
-        # Print statistics
-        print(f"Validation Loss = {loss:.4f}, Validation Accuracy = {acc:.4f}")
-
-    return loss, acc
+        return val_loss.compute().item()
 
 
 def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, device: torch.device, ckpt_path: str):
     net = net.to(device)
-    optimizer = Adam(net.parameters(), lr=LEARNING_RATE)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.5)
+    optimizer = AdamW(net.parameters(), lr=LEARNING_RATE)
+    scaler = torch.amp.GradScaler(device.type, enabled=AMP)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.9)
     for epoch in range(N_EPOCHS):
         print(f"Epoch {epoch + 1}/{N_EPOCHS}")
-        training(net, optimizer, train_dataset, source_id=-1, device=device)
+        training(net, optimizer, scaler, train_dataset, source_id=-1, device=device)
 
         scheduler.step()
         if epoch % VALIDATE_EVERY != 0:
@@ -88,11 +95,11 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
 
         for source_id in range(len(DATA_FILES)):
             source_name = DATA_FILES[source_id].split("_")[-1]
-            loss, acc = evaluation(net, val_dataset, source_id, device)
-            print(f"[{source_name}]: Validation Loss = {loss:.4f}, Validation Accuracy = {acc:.4f}")
+            loss = evaluation(net, val_dataset, source_id, device)
+            print(f"[{source_name}]: Validation Loss = {loss:.4f}")
 
-        loss, acc = evaluation(net, val_dataset, -1, device)
-        print(f"[ALL]: Validation Loss = {loss:.4f}, Validation Accuracy = {acc:.4f}")
+        loss = evaluation(net, val_dataset, -1, device)
+        print(f"[ALL]: Validation Loss = {loss:.4f}")
         save_ckpt(epoch, net, optimizer, scheduler, ckpt_path)
 
 
@@ -110,6 +117,7 @@ if __name__ == '__main__':
     parser.add_argument("--n_epochs", type=int, default=10, help='Number of epochs.')
     parser.add_argument("--validate_every", type=int, default=1, help='Validation every n epochs.')
     parser.add_argument("--n_workers", type=int, default=4, help='Number of workers for data loading.')
+    parser.add_argument("--enable-amp", action="store_true", help='Enable automatic mixed precision.')
 
     args = parser.parse_args()
 
@@ -130,6 +138,7 @@ if __name__ == '__main__':
     N_EPOCHS = args.n_epochs
     VALIDATE_EVERY = args.validate_every
     N_WORKERS = args.n_workers
+    AMP = args.enable_amp
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     seed_everything(SEED)
@@ -179,7 +188,7 @@ if __name__ == '__main__':
             ntoken=len(feature_names) + len(SPECIAL_TOKENS),
             n_input_bins=N_CLASSES,
             n_sources=len(DATA_FILES) + len(SPECIAL_TOKENS),
-            d_model=512,
+            d_model=256,
             nhead=8,
             d_hid=512,
             nlayers=4,

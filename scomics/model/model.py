@@ -47,10 +47,15 @@ class TransformerModel(nn.Module):
             d_model, nhead, d_hid, dropout, batch_first=True
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
-        self.out_layer = nn.Linear(d_model, n_input_bins)
+        self.out_layer = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, 1),
+        )
 
     def forward(self, batch) -> Tensor:
-        device = self.out_layer.weight.device
+        device = self.encoder.embedding.weight.device
 
         values = batch['X_bin_input'].to(device)
         sources = batch['X_input_source'].to(device)
