@@ -99,6 +99,8 @@ class SCOmicsDataWrapper(Dataset):
         if self.source_id != -1:
             mask = item["X_source"] == self.source_id
             X = X[mask]
+            if len(X) == 0:
+                print("Warning: No data for source ID", self.source_id)
             X_bin = X_bin[mask]
             X_source = X_source[mask]
             X_names = X_names[mask]

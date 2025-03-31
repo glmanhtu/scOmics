@@ -1,9 +1,10 @@
 import argparse
 import os.path
 
+import numpy as np
 import pandas as pd
 import torch
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 from torch import nn
 from torch.optim import Adam, Optimizer, AdamW
 from torch.utils.data import DataLoader
@@ -22,6 +23,7 @@ def training(net: nn.Module,
              source_id: int,
              device: torch.device):
     training_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id)
+    print("Effective training data size:", len(training_data))
     data_loader = DataLoader(training_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=N_WORKERS, pin_memory=True)
 
     net.train()
@@ -85,6 +87,7 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
     optimizer = AdamW(net.parameters(), lr=LEARNING_RATE)
     scaler = torch.amp.GradScaler(device.type, enabled=AMP)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.9)
+    best_loss = float('inf')
     for epoch in range(N_EPOCHS):
         print(f"Epoch {epoch + 1}/{N_EPOCHS}")
         training(net, optimizer, scaler, train_dataset, source_id=-1, device=device)
@@ -100,7 +103,11 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
 
         loss = evaluation(net, val_dataset, -1, device)
         print(f"[ALL]: Validation Loss = {loss:.4f}")
-        save_ckpt(epoch, net, optimizer, scheduler, ckpt_path)
+        save_ckpt(f'epoch-{epoch}', net, optimizer, scheduler, ckpt_path)
+        if loss < best_loss:
+            best_loss = loss
+            save_ckpt('best', net, optimizer, scheduler, ckpt_path)
+            print(f"Best model saved with loss: {best_loss:.4f} at epoch {epoch + 1}")
 
 
 if __name__ == '__main__':
@@ -178,26 +185,24 @@ if __name__ == '__main__':
         BinningTransform('X_masked', 'X_masked_bin', 'X_masked_source', N_BINS),
     ])
 
-    # K-Fold split
-    kf = KFold(n_splits=K_FOLD, shuffle=True, random_state=SEED)
-    for i, (train_indices, val_indices) in enumerate(kf.split(X_masked)):
-        print(f"Fold {i}")
-        print("TRAIN:", len(train_indices), "VAL:", len(val_indices))
+    train_indices, val_indices = train_test_split(np.arange(len(X_masked)), test_size=0.1, random_state=SEED)
+    train_indices, test_indices = train_indices[5:], train_indices[:5]  # 5 samples for testing and visualization
+    print("TRAIN:", len(train_indices), "VAL:", len(val_indices))
+    print("TEST indices:", test_indices)
 
-        model = TransformerModel(
-            ntoken=len(feature_names) + len(SPECIAL_TOKENS),
-            n_input_bins=N_CLASSES,
-            n_sources=len(DATA_FILES) + len(SPECIAL_TOKENS),
-            d_model=256,
-            nhead=8,
-            d_hid=512,
-            nlayers=4,
-            dropout=0.2,
-            pad_token_id=PAD_TOKEN_ID,
-        )
+    model = TransformerModel(
+        ntoken=len(feature_names) + len(SPECIAL_TOKENS),
+        n_input_bins=N_CLASSES,
+        n_sources=len(DATA_FILES) + len(SPECIAL_TOKENS),
+        d_model=256,
+        nhead=8,
+        d_hid=512,
+        nlayers=4,
+        dropout=0.2,
+        pad_token_id=PAD_TOKEN_ID,
+    )
 
-        training_data = SCOmicsData(X_masked.iloc[train_indices], X.iloc[train_indices], transforms)
-        validation_data = SCOmicsData(X_masked.iloc[val_indices], X.iloc[val_indices], transforms)
+    training_data = SCOmicsData(X_masked.iloc[train_indices], X.iloc[train_indices], transforms)
+    validation_data = SCOmicsData(X_masked.iloc[val_indices], X.iloc[val_indices], transforms)
 
-        ckpt_path = os.path.join(CKPT_FOLDER, f"model_fold_{i}")
-        fit(model, training_data, validation_data, device, ckpt_path)
+    fit(model, training_data, validation_data, device, CKPT_FOLDER)

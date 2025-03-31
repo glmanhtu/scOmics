@@ -6,6 +6,9 @@ from torch import nn
 
 def _digitize(x: np.ndarray, bins: np.ndarray, side="both") -> np.ndarray:
     """
+    Taken from https://github.com/bowang-lab/scGPT
+    See: https://github.com/bowang-lab/scGPT/issues/157
+
     Digitize the data into bins. This method spreads data uniformly when bins
     have same values.
 
