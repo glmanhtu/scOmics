@@ -197,7 +197,7 @@ if __name__ == '__main__':
         d_model=256,
         nhead=8,
         d_hid=512,
-        nlayers=4,
+        nlayers=6,
         dropout=0.2,
         pad_token_id=PAD_TOKEN_ID,
     )

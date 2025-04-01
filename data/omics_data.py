@@ -99,8 +99,6 @@ class SCOmicsDataWrapper(Dataset):
         if self.source_id != -1:
             mask = item["X_source"] == self.source_id
             X = X[mask]
-            if len(X) == 0:
-                print("Warning: No data for source ID", self.source_id)
             X_bin = X_bin[mask]
             X_source = X_source[mask]
             X_names = X_names[mask]
@@ -118,11 +116,11 @@ class SCOmicsDataWrapper(Dataset):
         X_masked_names = X_masked_names[X_masked_indices]
 
         if not self.eval_mode:
-            n_X = np.random.randint(int(0.2 * self.seq_len), self.seq_len - n_labels)
+            n_X = np.random.randint(int(0.5 * self.seq_len), self.seq_len - n_labels)
             n_X = n_X if n_X < len(X) else len(X)   # to avoid index out of range
             X_indices = np.random.choice(len(X), n_X, replace=False)
         else:
-            n_X = min(int(0.6 * self.seq_len), len(X))
+            n_X = min(int(0.7 * self.seq_len), len(X))
             X_indices = np.linspace(0, len(X) - 1, n_X, dtype=int)
 
         X = X[X_indices]
