@@ -60,7 +60,7 @@ class TransformerModel(nn.Module):
         values = batch['X_bin_input'].to(device)
         sources = batch['X_input_source'].to(device)
         x = batch['X_input_names'].to(device)
-        src_key_padding_mask = batch['X_key_padding_mask'].type(torch.float32).to(device)
+        src_key_padding_mask = batch['X_key_padding_mask'].type(torch.bool).to(device)
 
         x = self.encoder(x)
         sources = self.source_encoder(sources)
