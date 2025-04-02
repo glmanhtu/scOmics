@@ -46,7 +46,7 @@ class SCOmicsDataWrapper(Dataset):
                  mask_token_id: int,
                  token_shifting=0,
                  source_id=-1,
-                 n_label_range=(1, 5),
+                 n_label_range=(5, 10),
                  eval_mode=False,
                  ):
         """
@@ -146,14 +146,19 @@ class SCOmicsDataWrapper(Dataset):
         X_original_labels = np.full((self.seq_len,), self.pad_token_id, dtype=np.float32)
         X_original_labels[n_X:n_X + n_labels] = X_masked
 
+        X_original_labels_mask = np.full((self.seq_len,), False, dtype=np.bool)
+        X_original_labels_mask[n_X:n_X + n_labels] = True
+
         X_key_padding_mask = np.full((self.seq_len,), True, dtype=np.int64)
         X_key_padding_mask[:n_X + n_labels] = False
 
         return {
+            "X_id": chunk['idx'],
             "X_bin_input": X_input,
             "X_input_source": X_input_source,
             "X_input_names": X_input_names,
             "X_bin_labels": X_labels,
             "X_original_labels": X_original_labels,
+            "X_original_labels_mask": X_original_labels_mask,
             "X_key_padding_mask": X_key_padding_mask
         }

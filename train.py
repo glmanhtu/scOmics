@@ -4,27 +4,27 @@ import os.path
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import train_test_split
 from torch import nn
-from torch.optim import Adam, Optimizer, AdamW
+from torch.optim import Optimizer, AdamW
 from torch.utils.data import DataLoader
 from data.omics_data import SCOmicsData, SCOmicsDataWrapper
 from data.preprocessing import DataTransform, Compose, BinningTransform, SourceNameExtractor, FeatureIdExtractor
 from scomics.model.model import TransformerModel
-from torchmetrics import MeanMetric, Accuracy
+from torchmetrics import MeanMetric
 
-from utils.utils import save_ckpt, seed_everything
+from utils.utils import save_ckpt, seed_everything, load_ckpt
 
 
 def training(net: nn.Module,
              optimizer: Optimizer,
-             scaler: torch.cuda.amp.GradScaler,
+             scaler: torch.amp.GradScaler,
              dataset: SCOmicsData,
              source_id: int,
              device: torch.device):
-    training_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id)
-    print("Effective training data size:", len(training_data))
-    data_loader = DataLoader(training_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=N_WORKERS, pin_memory=True)
+    train_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id)
+    print("Effective training data size:", len(train_data))
+    data_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=N_WORKERS, pin_memory=True)
 
     net.train()
     train_loss = MeanMetric()
@@ -35,9 +35,8 @@ def training(net: nn.Module,
         with torch.amp.autocast(device.type, enabled=AMP):
             output = net(batch)
 
-            preds, actual = output.view(-1), batch['X_original_labels'].view(-1).to(device)
-            padding_mask = actual != PAD_TOKEN_ID
-            preds, actual = preds[padding_mask], actual[padding_mask]
+            pad_mask = batch['X_original_labels_mask']
+            preds, actual = output[pad_mask].view(-1), batch['X_original_labels'][pad_mask].view(-1).to(device)
 
             loss = loss_fn(preds, actual)
 
@@ -53,11 +52,11 @@ def training(net: nn.Module,
 
         # Print statistics
         if index > 0 and index % 50 == 0:
-            print(f"Step {index + 1}/{len(data_loader)}: "
-                  f"Average Loss = {train_loss.compute().item():.4f}")
+            print(f"Step {index + 1}/{len(data_loader)}: Average Loss = {train_loss.compute().item():.4f}")
             train_loss.reset()
 
 
+@torch.no_grad()
 def evaluation(net: torch.nn.Module, dataset: SCOmicsData, source_id: int, device: torch.device):
     val_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id, eval_mode=True)
     val_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=N_WORKERS, pin_memory=True)
@@ -65,21 +64,50 @@ def evaluation(net: torch.nn.Module, dataset: SCOmicsData, source_id: int, devic
     net.eval()
     val_loss = MeanMetric()
     loss_fn = torch.nn.MSELoss(reduction='mean')
-    with torch.no_grad():
-        for index, batch in enumerate(val_loader):
-            with torch.amp.autocast(device.type, enabled=AMP):
-                output = net(batch)
+    for index, batch in enumerate(val_loader):
+        with torch.amp.autocast(device.type, enabled=AMP):
+            output = net(batch)
 
-                # Compute loss
-                preds, actual = output.view(-1),  batch['X_original_labels'].view(-1).to(device)
-                padding_mask = actual != PAD_TOKEN_ID
-                preds, actual = preds[padding_mask], actual[padding_mask]
+            pad_mask = batch['X_original_labels_mask']
+            preds, actual = output[pad_mask].view(-1),  batch['X_original_labels'][pad_mask].view(-1).to(device)
 
-                loss = loss_fn(preds, actual)
+            loss = loss_fn(preds, actual)
+        val_loss.update(loss.item())
 
-            val_loss.update(loss.item())
+    return val_loss.compute().item()
 
-        return val_loss.compute().item()
+
+@torch.no_grad()
+def testing(net: nn.Module, dataset: SCOmicsData, source_id: int, feature_idx_map, device: torch.device):
+    test_data = SCOmicsDataWrapper(dataset, SEQ_LEN, PAD_TOKEN_ID, MASK_TOKEN_ID, len(SPECIAL_TOKENS), source_id, eval_mode=True)
+    test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=N_WORKERS, pin_memory=True)
+
+    net.eval()
+    predictions = {}
+    actuals = {}
+    for index, batch in enumerate(test_loader):
+        with torch.amp.autocast(device.type, enabled=AMP):
+            output = net(batch)
+            B, _, _ = output.shape
+            preds, actual = output, batch['X_original_labels'].to(device)
+            label_mask = batch['X_original_labels_mask']
+
+            # Reconstruct the predictions and actual dataframe
+            for i in range(B):
+                i_preds = preds[i][label_mask[i]].view(-1)
+                i_actual = actual[i][label_mask[i]].view(-1)
+                features = batch['X_input_names'][i][label_mask[i]] - len(SPECIAL_TOKENS)
+                item_id = batch['X_id'][i].item()
+                for f_id,  feature in enumerate(features):
+                    feature_name = feature_idx_map[feature.item()]
+                    predictions.setdefault(feature_name, np.zeros((len(dataset), )))[item_id] = i_preds[f_id].item()
+                    actuals.setdefault(feature_name, np.zeros((len(dataset), )))[item_id] = i_actual[f_id].item()
+
+    predictions = pd.DataFrame.from_dict(predictions)
+    predictions.index = dataset.X_masked.index
+    actuals = pd.DataFrame.from_dict(actuals)
+    actuals.index = dataset.X_masked.index
+    return predictions, actuals
 
 
 def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, device: torch.device, ckpt_path: str):
@@ -115,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument("--data_path", type=str, default='resources/dataset')
     parser.add_argument("--ckpt_folder", type=str, default='ckpt')
     parser.add_argument("--seed", type=int, default=2025, help='Random seed.')
-    parser.add_argument("--n_bins", type=int, default=51, help='Number of bins for binning.')
+    parser.add_argument("--n_bins", type=int, default=21, help='Number of bins for binning.')
     parser.add_argument("--batch_size", type=int, default=32, help='Batch size.')
     parser.add_argument("--seq_len", type=int, default=512, help='Sequence length.')
     parser.add_argument("--val_dataset_name", type=str, default='proteomics', help='Validation dataset name.')
@@ -139,7 +167,6 @@ if __name__ == '__main__':
     MASK_TOKEN_ID = 1
     SPECIAL_TOKENS = [PAD_TOKEN_ID, MASK_TOKEN_ID]
 
-    N_CLASSES = N_BINS + len(SPECIAL_TOKENS)
     SEQ_LEN = args.seq_len
     LEARNING_RATE = args.learning_rate
     N_EPOCHS = args.n_epochs
@@ -175,6 +202,7 @@ if __name__ == '__main__':
     X = pd.concat(X, axis=1)
     feature_names = list(sorted(set(feature_names)))
     feature_map = {name: i for i, name in enumerate(feature_names)}
+    feature_idx_map = {i: name for i, name in enumerate(feature_names)}
 
     transforms = Compose([
         DataTransform('X_masked_names', 'X_masked_source', SourceNameExtractor()),
@@ -192,7 +220,7 @@ if __name__ == '__main__':
 
     model = TransformerModel(
         ntoken=len(feature_names) + len(SPECIAL_TOKENS),
-        n_input_bins=N_CLASSES,
+        n_input_bins=N_BINS + len(SPECIAL_TOKENS),
         n_sources=len(DATA_FILES) + len(SPECIAL_TOKENS),
         d_model=256,
         nhead=8,
@@ -206,3 +234,18 @@ if __name__ == '__main__':
     validation_data = SCOmicsData(X_masked.iloc[val_indices], X.iloc[val_indices], transforms)
 
     fit(model, training_data, validation_data, device, CKPT_FOLDER)
+
+    # Load the best model for evaluating on the test set
+    model = load_ckpt(model, "best", CKPT_FOLDER, device)
+    test_data = SCOmicsData(X_masked.iloc[test_indices], X.iloc[test_indices], transforms)
+
+    df_preds, df_gt = testing(model, test_data, -1, feature_idx_map, device)
+    df_preds.to_csv(os.path.join(CKPT_FOLDER, 'test_predictions.csv'))
+    df_gt.to_csv(os.path.join(CKPT_FOLDER, 'test_ground_truth.csv'))
+
+    # Compute MAE dataframe from predictions and ground truth
+    mae_df = pd.DataFrame(index=df_preds.index, columns=df_preds.columns)
+    for col in df_preds.columns:
+        mae_df[col] = np.abs(df_preds[col] - df_gt[col])
+
+    mae_df.to_csv(os.path.join(CKPT_FOLDER, 'test_mae.csv'))

@@ -21,6 +21,17 @@ def save_ckpt(model_name, model, optimizer, scheduler, ckpt_folder):
     )
 
 
+def load_ckpt(model, model_name, ckpt_folder, device):
+    """
+    load checkpoint
+    """
+    if not os.path.exists(ckpt_folder):
+        raise ValueError(f"Checkpoint folder {ckpt_folder} does not exist.")
+    checkpoint = torch.load(os.path.join(ckpt_folder, f'{model_name}.pth'), map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    return model
+
+
 def seed_everything(seed: int):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
