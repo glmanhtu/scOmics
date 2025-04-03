@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from data.omics_data import SCOmicsData, SCOmicsDataWrapper
 from data.preprocessing import DataTransform, Compose, BinningTransform, SourceNameExtractor, FeatureIdExtractor
 from scomics.model.model import TransformerModel
-from torchmetrics import MeanMetric
+from torchmetrics import MeanMetric, PearsonCorrCoef
 
 from utils.utils import save_ckpt, seed_everything, load_ckpt
 
@@ -62,19 +62,22 @@ def evaluation(net: torch.nn.Module, dataset: SCOmicsData, source_id: int, devic
     val_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=N_WORKERS, pin_memory=True)
 
     net.eval()
-    val_loss = MeanMetric()
+    pearson_coff_fn = PearsonCorrCoef()
     loss_fn = torch.nn.MSELoss(reduction='mean')
+    predictions, actuals = torch.tensor([]), torch.tensor([])
     for index, batch in enumerate(val_loader):
         with torch.amp.autocast(device.type, enabled=AMP):
             output = net(batch)
 
             pad_mask = batch['X_original_labels_mask']
             preds, actual = output[pad_mask].view(-1),  batch['X_original_labels'][pad_mask].view(-1).to(device)
+            predictions = torch.cat((predictions, preds.cpu()), dim=0)
+            actuals = torch.cat((actuals, actual.cpu()), dim=0)
 
-            loss = loss_fn(preds, actual)
-        val_loss.update(loss.item())
+    loss = loss_fn(predictions, actuals)
+    pearson_coff = pearson_coff_fn(predictions, actuals)
 
-    return val_loss.compute().item()
+    return loss.item(), pearson_coff.item()
 
 
 @torch.no_grad()
@@ -126,11 +129,11 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
 
         for source_id in range(len(DATA_FILES)):
             source_name = DATA_FILES[source_id].split("_")[-1]
-            loss = evaluation(net, val_dataset, source_id, device)
-            print(f"[{source_name}]: Validation Loss = {loss:.4f}")
+            loss, pearson_coff = evaluation(net, val_dataset, source_id, device)
+            print(f"[{source_name}]: Validation Loss = {loss:.4f}, Pearson Coefficient = {pearson_coff:.4f}")
 
-        loss = evaluation(net, val_dataset, -1, device)
-        print(f"[ALL]: Validation Loss = {loss:.4f}")
+        loss, pearson_coff = evaluation(net, val_dataset, -1, device)
+        print(f"[ALL]: Validation Loss = {loss:.4f}, Pearson Coefficient = {pearson_coff:.4f}")
         save_ckpt(f'epoch-{epoch}', net, optimizer, scheduler, ckpt_path)
         if loss < best_loss:
             best_loss = loss
