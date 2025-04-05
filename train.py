@@ -29,6 +29,7 @@ def training(net: nn.Module,
     net.train()
     train_loss = MeanMetric()
     loss_fn = torch.nn.MSELoss(reduction='mean')
+    last_loss = float('inf')
     for index, batch in enumerate(data_loader):
         # Forward pass
         optimizer.zero_grad()
@@ -52,8 +53,11 @@ def training(net: nn.Module,
 
         # Print statistics
         if index > 0 and index % 50 == 0:
-            print(f"Step {index + 1}/{len(data_loader)}: Average Loss = {train_loss.compute().item():.4f}")
+            last_loss = train_loss.compute().item()
+            print(f"Step {index + 1}/{len(data_loader)}: Average Loss = {last_loss:.4f}")
             train_loss.reset()
+
+    return last_loss
 
 
 @torch.no_grad()
@@ -126,9 +130,11 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
     scaler = torch.amp.GradScaler(device.type, enabled=AMP)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.9)
     best_loss = float('inf')
+    train_losses, val_losses = [], []
     for epoch in range(N_EPOCHS):
         print(f"Epoch {epoch + 1}/{N_EPOCHS}")
-        training(net, optimizer, scaler, train_dataset, source_id=-1, device=device)
+        train_loss = training(net, optimizer, scaler, train_dataset, source_id=-1, device=device)
+        train_losses.append(train_loss)
 
         scheduler.step()
         if epoch % VALIDATE_EVERY != 0:
@@ -142,12 +148,15 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
             print(f"[{source_name}]: Validation Loss = {loss:.4f}, Pearson Coefficient = {pearson_coff:.4f}")
 
         loss, pearson_coff = evaluation(net, val_dataset, -1, device)
+        val_losses.append(loss)
         print(f"[ALL]: Validation Loss = {loss:.4f}, Pearson Coefficient = {pearson_coff:.4f}")
         save_ckpt(f'epoch-{epoch}', net, optimizer, scheduler, ckpt_path)
         if loss < best_loss:
             best_loss = loss
             save_ckpt('best', net, optimizer, scheduler, ckpt_path)
             print(f"Best model saved with loss: {best_loss:.4f} at epoch {epoch + 1}")
+
+    return train_losses, val_losses
 
 
 if __name__ == '__main__':
@@ -252,12 +261,15 @@ if __name__ == '__main__':
     test_data = SCOmicsData(X_masked.iloc[test_indices], X.iloc[test_indices], transforms)
 
     df_preds, df_gt = testing(model, test_data, -1, feature_idx_map, device)
-    df_preds.to_csv(os.path.join(CKPT_FOLDER, 'test_predictions.csv'))
-    df_gt.to_csv(os.path.join(CKPT_FOLDER, 'test_ground_truth.csv'))
 
     # Compute MAE dataframe from predictions and ground truth
     mae_df = pd.DataFrame(index=df_preds.index, columns=df_preds.columns)
     for col in df_preds.columns:
         mae_df[col] = np.abs(df_preds[col] - df_gt[col])
 
-    mae_df.to_csv(os.path.join(CKPT_FOLDER, 'test_mae.csv'))
+    # Average MAE for each feature
+    mae_df_features = mae_df.mean(axis=0).sort_values(ascending=True)
+
+    top_20_features = mae_df_features.head(20).keys().tolist()
+    print("Top 20 features were predicted the best:")
+    print(top_20_features)
