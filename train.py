@@ -110,6 +110,13 @@ def testing(net: nn.Module, dataset: SCOmicsData, source_id: int, feature_idx_ma
     predictions.index = dataset.X_masked.index
     actuals = pd.DataFrame.from_dict(actuals)
     actuals.index = dataset.X_masked.index
+    prediction_torch = torch.tensor(predictions.to_numpy().flatten())
+    actuals_torch = torch.tensor(actuals.to_numpy().flatten())
+    pearson_coff_fn = PearsonCorrCoef()
+    pearson_coff = pearson_coff_fn(prediction_torch, actuals_torch)
+    mse_loss = nn.MSELoss(reduction='mean')(prediction_torch, actuals_torch)
+
+    print(f"Test Loss = {mse_loss.item():.4f}, Pearson Coefficient = {pearson_coff.item():.4f}")
     return predictions, actuals
 
 
@@ -129,6 +136,8 @@ def fit(net: nn.Module, train_dataset: SCOmicsData, val_dataset: SCOmicsData, de
 
         for source_id in range(len(DATA_FILES)):
             source_name = DATA_FILES[source_id].split("_")[-1]
+            if VAL_DATASET_NAME in source_name:
+                continue
             loss, pearson_coff = evaluation(net, val_dataset, source_id, device)
             print(f"[{source_name}]: Validation Loss = {loss:.4f}, Pearson Coefficient = {pearson_coff:.4f}")
 
