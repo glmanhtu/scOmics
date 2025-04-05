@@ -39,6 +39,7 @@ class TransformerModel(nn.Module):
     ):
         super().__init__()
         self.d_model = d_model
+        self.nhead = nhead
         self.encoder = OmicsEncoder(ntoken, d_model, padding_idx=pad_token_id)
         self.value_encoder = OmicsEncoder(n_input_bins, d_model, padding_idx=pad_token_id)
         self.source_encoder = OmicsEncoder(n_sources, d_model, padding_idx=pad_token_id)
@@ -60,12 +61,15 @@ class TransformerModel(nn.Module):
         values = batch['X_bin_input'].to(device)
         sources = batch['X_input_source'].to(device)
         x = batch['X_input_names'].to(device)
-        src_key_padding_mask = batch['X_key_padding_mask'].type(torch.bool).to(device)
+        x_mask = batch['X_mask'].to(device)
+        # expand the mask to match the number of heads
+        x_mask = torch.repeat_interleave(x_mask, self.nhead, dim=0)
+        x_key_padding_mask = batch['X_key_padding_mask'].to(device)
 
         x = self.encoder(x)
         sources = self.source_encoder(sources)
         values = self.value_encoder(values)
         x = x + sources + values
-        x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+        x = self.transformer_encoder(x, mask=x_mask, src_key_padding_mask=x_key_padding_mask)
         x = self.out_layer(x)
         return x

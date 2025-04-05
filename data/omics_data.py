@@ -154,8 +154,11 @@ class SCOmicsDataWrapper(Dataset):
         X_original_labels_mask = np.full((self.seq_len,), False, dtype=np.bool)
         X_original_labels_mask[n_X:n_X + n_labels] = True
 
-        X_key_padding_mask = np.full((self.seq_len,), True, dtype=np.int64)
-        X_key_padding_mask[:n_X + n_labels] = False
+        X_mask = np.zeros((self.seq_len,self.seq_len), dtype=np.float32)
+        X_mask[:, n_X:n_X + n_labels] = float('-inf')   # Do not attend to the masked tokens
+
+        X_key_padding_mask = np.zeros((self.seq_len,), dtype=np.float32)
+        X_key_padding_mask[n_X + n_labels:] = float('-inf') # Do not attend to the padding tokens
 
         return {
             "X_id": chunk['idx'],
@@ -165,5 +168,6 @@ class SCOmicsDataWrapper(Dataset):
             "X_bin_labels": X_labels,
             "X_original_labels": X_original_labels,
             "X_original_labels_mask": X_original_labels_mask,
-            "X_key_padding_mask": X_key_padding_mask
+            "X_key_padding_mask": X_key_padding_mask,
+            "X_mask": X_mask
         }

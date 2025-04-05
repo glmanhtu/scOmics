@@ -142,7 +142,7 @@ class BinningTransform(nn.Module):
             non_zero_row = group_data[non_zero_ids]
             bins = np.quantile(non_zero_row, np.linspace(0, 1, self.n_bins - 1))
 
-            non_zero_digits = _digitize(non_zero_row, bins)
+            non_zero_digits = np.digitize(non_zero_row, bins)
             assert non_zero_digits.min() >= 1
             assert non_zero_digits.max() <= self.n_bins - 1
             binned_row = np.zeros_like(group_data, dtype=np.int64)
