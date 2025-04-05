@@ -14,8 +14,8 @@ def save_ckpt(model_name, model, optimizer, scheduler, ckpt_folder):
     torch.save(
         {
             'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict(),
+            # 'optimizer_state_dict': optimizer.state_dict(),
+            # 'scheduler_state_dict': scheduler.state_dict(),
         },
         os.path.join(ckpt_folder, f'{model_name}.pth')
     )
