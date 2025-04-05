@@ -1,5 +1,6 @@
 import numpy as np
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 
 class SCOmicsData(Dataset):
@@ -17,25 +18,28 @@ class SCOmicsData(Dataset):
         self.X = X
         self.transform = transform
 
+        self.items = []
+        for i in tqdm(range(len(self)), desc="Preparing dataset"):
+            X_masked_row = self.X_masked.iloc[i]
+            X_row = self.X.iloc[i]
+
+            assert X_masked_row.name == X_row.name
+
+            results = {
+                'X_masked': X_masked_row.values.astype(np.float32),
+                'X_masked_names': self.X_masked.columns.tolist(),
+                'X': X_row.values.astype(np.float32),
+                'X_names': self.X.columns.tolist(),
+            }
+            if self.transform:
+                results = self.transform(results)
+            self.items.append(results)
+
     def __len__(self) -> int:
         return len(self.X_masked)
 
     def __getitem__(self, idx: int):
-        X_masked_row = self.X_masked.iloc[idx]
-        X_row = self.X.iloc[idx]
-
-        assert X_masked_row.name == X_row.name
-
-        results = {
-            'X_masked': X_masked_row.values.astype(np.float32),
-            'X_masked_names': self.X_masked.columns.tolist(),
-            'X': X_row.values.astype(np.float32),
-            'X_names': self.X.columns.tolist(),
-        }
-
-        if self.transform:
-            results = self.transform(results)
-        return results
+       return self.items[idx]
 
 
 class SCOmicsDataWrapper(Dataset):
@@ -81,6 +85,7 @@ class SCOmicsDataWrapper(Dataset):
                 indices, X_masked_indices = X_masked_indices[:n_labels], X_masked_indices[n_labels:]
                 self.items.append({
                     'idx': i,
+                    'item': self.dataset[i],
                     'X_masked_indices': indices
                 })
 
@@ -89,7 +94,7 @@ class SCOmicsDataWrapper(Dataset):
 
     def __getitem__(self, idx: int):
         chunk = self.items[idx]
-        item = self.dataset[chunk['idx']]
+        item = chunk['item']
 
         X = item["X"]
         X_bin = item["X_bin"] + self.token_shifting
